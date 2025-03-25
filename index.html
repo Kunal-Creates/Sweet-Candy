@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sweet Match Game</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            background-color: #1a2a44;
+            color: #fff;
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        h1 {
+            color: #ff66b2;
+            font-size: clamp(1.5em, 5vw, 2.5em); /* Responsive font size */
+            margin: 2vh 0;
+            text-shadow: 0 0 10px rgba(255, 102, 178, 0.8);
+        }
+
+        #score {
+            font-size: clamp(1em, 3vw, 1.5em);
+            margin-bottom: 1vh;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+        }
+
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(8, minmax(0, 1fr));
+            gap: 0.5vw;
+            background-color: rgba(46, 64, 102, 0.8);
+            padding: 1vw;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            width: clamp(300px, 90vw, 600px); /* Responsive width */
+            max-width: 100%;
+        }
+
+        .tile {
+            aspect-ratio: 1 / 1; /* Square tiles */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: clamp(1em, 4vw, 2em);
+            cursor: pointer;
+            border-radius: 8px;
+            transition: transform 0.3s, opacity 0.3s;
+        }
+
+        .tile[data-sweet="🍬"] { background-color: #ff9999; }
+        .tile[data-sweet="🍭"] { background-color: #66ccff; }
+        .tile[data-sweet="🍫"] { background-color: #cc9966; }
+        .tile[data-sweet="🍩"] { background-color: #ffcc66; }
+        .tile[data-sweet="🍪"] { background-color: #ff99cc; }
+        .tile[data-sweet="🧁"] { background-color: #99ff99; }
+        .tile[data-sweet="striped-h"] { background: linear-gradient(90deg, #fff 50%, #ffcc00 50%); }
+        .tile[data-sweet="striped-v"] { background: linear-gradient(0deg, #fff 50%, #ffcc00 50%); }
+        .tile[data-sweet="wrapped"] { background-color: #ff66b2; border: 2px dashed #fff; }
+        .tile[data-sweet="bomb"] { background-color: #000; color: #fff; }
+
+        .tile:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.7);
+        }
+
+        .selected {
+            border: 3px solid #ffcc00;
+            box-shadow: 0 0 15px #ffcc00;
+        }
+
+        .matched {
+            opacity: 0;
+        }
+
+        .swapping {
+            transition: transform 0.3s ease-in-out;
+        }
+
+        /* Media Queries for extra responsiveness */
+        @media (max-width: 400px) {
+            #game-board {
+                gap: 0.2vw;
+                padding: 0.5vw;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Sweet Match</h1>
+    <div id="score">Score: <span id="score-value">0</span></div>
+    <div id="game-board"></div>
+    <audio id="background-music" autoplay loop>
+        <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
+        <!-- Replace with your own calm background music file -->
+        Your browser does not support the audio element.
+    </audio>
+    <audio id="match-sound">
+        <source src="https://www.myinstants.com/media/sounds/sweet.mp3" type="audio/mpeg">
+        <!-- Replace with your own "Sweet!" voice sound file -->
+        Your browser does not support the audio element.
+    </audio>
+    <script>
+        const sweets = ['🍬', '🍭', '🍫', '🍩', '🍪', '🧁'];
+        const specialSweets = {
+            stripedH: 'striped-h',
+            stripedV: 'striped-v',
+            wrapped: 'wrapped',
+            bomb: 'bomb'
+        };
+        const boardSize = 8;
+        const board = [];
+        let selectedTile = null;
+        let score = 0;
+        const scoreValue = document.getElementById('score-value');
+        const gameBoard = document.getElementById('game-board');
+        const backgroundMusic = document.getElementById('background-music');
+        const matchSound = document.getElementById('match-sound');
+
+        // Set background music volume (subtle)
+        backgroundMusic.volume = 0.2;
+
+        // Initialize the board
+        function initBoard() {
+            for (let i = 0; i < boardSize; i++) {
+                board[i] = [];
+                for (let j = 0; j < boardSize; j++) {
+                    const tile = document.createElement('div');
+                    tile.classList.add('tile');
+                    const randomSweet = sweets[Math.floor(Math.random() * sweets.length)];
+                    tile.textContent = randomSweet;
+                    tile.dataset.row = i;
+                    tile.dataset.col = j;
+                    tile.dataset.sweet = randomSweet;
+                    tile.addEventListener('click', handleTileClick);
+                    gameBoard.appendChild(tile);
+                    board[i][j] = randomSweet;
+                }
+            }
+            resolveMatchesByDefault();
+        }
+
+        // Handle tile clicks
+        function handleTileClick(e) {
+            const tile = e.target;
+            const row = parseInt(tile.dataset.row);
+            const col = parseInt(tile.dataset.col);
+
+            if (!selectedTile) {
+                selectedTile = tile;
+                tile.classList.add('selected');
+            } else {
+                const prevRow = parseInt(selectedTile.dataset.row);
+                const prevCol = parseInt(selectedTile.dataset.col);
+
+                const rowDiff = Math.abs(row - prevRow);
+                const colDiff = Math.abs(col - prevCol);
+                if ((rowDiff <= 1 && colDiff <= 1) && !(rowDiff === 0 && colDiff === 0)) {
+                    swapTiles(row, col, prevRow, prevCol);
+                    setTimeout(() => {
+                        if (!checkMatches()) {
+                            swapTiles(row, col, prevRow, prevCol); // Swap back if no match
+                        } else {
+                            matchSound.currentTime = 0; // Reset sound
+                            matchSound.play(); // Play "Sweet!" voice
+                            resolveMatchesByDefault();
+                        }
+                    }, 400);
+                }
+
+                selectedTile.classList.remove('selected');
+                selectedTile = null;
+            }
+        }
+
+        // Swap tiles
+        function swapTiles(row1, col1, row2, col2) {
+            const tile1 = document.querySelector(`[data-row="${row1}"][data-col="${col1}"]`);
+            const tile2 = document.querySelector(`[data-row="${row2}"][data-col="${col2}"]`);
+
+            tile1.classList.add('swapping');
+            tile2.classList.add('swapping');
+
+            const rowDiff = row2 - row1;
+            const colDiff = col2 - col1;
+            tile1.style.transform = `translate(${colDiff * 64}px, ${rowDiff * 64}px)`;
+            tile2.style.transform = `translate(${-colDiff * 64}px, ${-rowDiff * 64}px)`;
+
+            setTimeout(() => {
+                const tempSweet = tile1.textContent;
+                tile1.textContent = tile2.textContent;
+                tile1.dataset.sweet = tile2.textContent;
+                tile2.textContent = tempSweet;
+                tile2.dataset.sweet = tempSweet;
+
+                board[row1][col1] = tile1.textContent;
+                board[row2][col2] = tile2.textContent;
+
+                tile1.style.transform = 'none';
+                tile2.style.transform = 'none';
+                tile1.classList.remove('swapping');
+                tile2.classList.remove('swapping');
+            }, 300);
+        }
+
+        // Check for matches (Candy Crush style)
+        function checkMatches() {
+            let matched = false;
+            const toMark = [];
+
+            // Horizontal matches
+            for (let i = 0; i < boardSize; i++) {
+                for (let j = 0; j < boardSize - 2; j++) {
+                    if (board[i][j] && board[i][j] === board[i][j + 1] && board[i][j] === board[i][j + 2] && !isSpecial(board[i][j])) {
+                        const matchLength = checkMatchLength(i, j, 0, 1);
+                        if (matchLength >= 3) {
+                            toMark.push({ type: 'horizontal', row: i, col: j, length: matchLength });
+                            matched = true;
+                        }
+                    }
+                }
+            }
+
+            // Vertical matches
+            for (let j = 0; j < boardSize; j++) {
+                for (let i = 0; i < boardSize - 2; i++) {
+                    if (board[i][j] && board[i][j] === board[i + 1][j] && board[i][j] === board[i + 2][j] && !isSpecial(board[i][j])) {
+                        const matchLength = checkMatchLength(i, j, 1, 0);
+                        if (matchLength >= 3) {
+                            toMark.push({ type: 'vertical', row: i, col: j, length: matchLength });
+                            matched = true;
+                        }
+                    }
+                }
+            }
+
+            // L/T shape matches
+            for (let i = 0; i < boardSize; i++) {
+                for (let j = 0; j < boardSize; j++) {
+                    if (checkLShape(i, j)) {
+                        toMark.push({ type: 'L', row: i, col: j });
+                        matched = true;
+                    }
+                }
+            }
+
+            if (matched) {
+                handleMatches(toMark);
+            }
+            return matched;
+        }
+
+        // Check match length in a direction
+        function checkMatchLength(row, col, rowDir, colDir) {
+            const sweet = board[row][col];
+            let length = 1;
+            let r = row + rowDir;
+            let c = col + colDir;
+            while (r >= 0 && r < boardSize && c >= 0 && c < boardSize && board[r][c] === sweet) {
+                length++;
+                r += rowDir;
+                c += colDir;
+            }
+            return length;
+        }
+
+        // Check for L/T shapes (5 candies)
+        function checkLShape(row, col) {
+            const sweet = board[row][col];
+            if (!sweet || isSpecial(sweet)) return false;
+
+            const patterns = [
+                // L shapes (e.g., 3 vertical + 2 horizontal)
+                [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2]], // Bottom-right
+                [[0, 0], [1, 0], [2, 0], [2, -1], [2, -2]], // Bottom-left
+                [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2]], // Top-right
+                [[0, 0], [0, -1], [0, -2], [1, -2], [2, -2]] // Top-left
+            ];
+
+            for (let pattern of patterns) {
+                let valid = true;
+                for (let [dr, dc] of pattern) {
+                    const r = row + dr;
+                    const c = col + dc;
+                    if (r < 0 || r >= boardSize || c < 0 || c >= boardSize || board[r][c] !== sweet) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (valid) return true;
+            }
+            return false;
+        }
+
+        // Handle matches and create special candies
+        function handleMatches(matches) {
+            matches.forEach(match => {
+                if (match.type === 'horizontal' || match.type === 'vertical') {
+                    const { row, col, length } = match;
+                    const dir = match.type === 'horizontal' ? [0, 1] : [1, 0];
+                    const tiles = [];
+                    for (let i = 0; i < length; i++) {
+                        const r = row + i * dir[0];
+                        const c = col + i * dir[1];
+                        tiles.push([r, c]);
+                    }
+
+                    if (length === 3) {
+                        markMatched(tiles[0][0], tiles[0][1], tiles[1][0], tiles[1][1], tiles[2][0], tiles[2][1]);
+                    } else if (length === 4) {
+                        const midTile = tiles[1]; // Middle of 4
+                        createSpecial(midTile[0], midTile[1], match.type === 'horizontal' ? specialSweets.stripedH : specialSweets.stripedV);
+                        tiles.forEach(([r, c]) => {
+                            if (r !== midTile[0] || c !== midTile[1]) markTile(r, c);
+                        });
+                    } else if (length >= 5) {
+                        const midTile = tiles[2]; // Middle of 5
+                        createSpecial(midTile[0], midTile[1], specialSweets.bomb);
+                        tiles.forEach(([r, c]) => {
+                            if (r !== midTile[0] || c !== midTile[1]) markTile(r, c);
+                        });
+                    }
+                } else if (match.type === 'L') {
+                    const { row, col } = match;
+                    createSpecial(row, col, specialSweets.wrapped);
+                    // Mark surrounding tiles in L shape (simplified)
+                    const pattern = [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2]]; // Example pattern
+                    pattern.forEach(([dr, dc]) => {
+                        const r = row + dr;
+                        const c = col + dc;
+                        if (r >= 0 && r < boardSize && c >= 0 && c < boardSize && !(dr === 0 && dc === 0)) {
+                            markTile(r, c);
+                        }
+                    });
+                }
+            });
+        }
+
+        // Mark a single tile
+        function markTile(row, col) {
+            const tile = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            tile.classList.add('matched');
+            setTimeout(() => {
+                const newSweet = sweets[Math.floor(Math.random() * sweets.length)];
+                tile.textContent = newSweet;
+                tile.dataset.sweet = newSweet;
+                board[row][col] = newSweet;
+                tile.classList.remove('matched');
+            }, 300);
+        }
+
+        // Create special candy
+        function createSpecial(row, col, type) {
+            const tile = document.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+            tile.textContent = type === specialSweets.bomb ? '💣' : type === specialSweets.wrapped ? '🎁' : '🍬';
+            tile.dataset.sweet = type;
+            board[row][col] = type;
+        }
+
+        // Mark matched tiles (for 3-match)
+        function markMatched(r1, c1, r2, c2, r3, c3) {
+            const tiles = [
+                document.querySelector(`[data-row="${r1}"][data-col="${c1}"]`),
+                document.querySelector(`[data-row="${r2}"][data-col="${c2}"]`),
+                document.querySelector(`[data-row="${r3}"][data-col="${c3}"]`)
+            ];
+            tiles.forEach(tile => {
+                tile.classList.add('matched');
+                const row = parseInt(tile.dataset.row);
+                const col = parseInt(tile.dataset.col);
+                setTimeout(() => {
+                    const newSweet = sweets[Math.floor(Math.random() * sweets.length)];
+                    tile.textContent = newSweet;
+                    tile.dataset.sweet = newSweet;
+                    board[row][col] = newSweet;
+                    tile.classList.remove('matched');
+                }, 300);
+            });
+            score += 10;
+            scoreValue.textContent = score;
+        }
+
+        // Check if a sweet is special
+        function isSpecial(sweet) {
+            return Object.values(specialSweets).includes(sweet);
+        }
+
+        // Resolve matches by default
+        function resolveMatchesByDefault() {
+            let hasMatches = false;
+            do {
+                hasMatches = checkMatches();
+                if (hasMatches) {
+                    setTimeout(() => {
+                        resolveMatchesByDefault();
+                    }, 400);
+                    return;
+                }
+            } while (hasMatches);
+        }
+
+        // Start the game
+        initBoard();
+    </script>
+</body>
+</html>
